@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { useBacktest } from '../context/BacktestContext';
-import { Calendar } from 'lucide-react';
+import { Calendar, Eye, EyeOff } from 'lucide-react';
+import { createChart, ColorType, LineStyle } from 'lightweight-charts';
 
 interface PeriodData {
   time: string;
@@ -11,6 +12,7 @@ interface PeriodData {
   convertFX: number;
   open: number;
   total: number;
+  timestamp: number;
 }
 
 export const Analytics: React.FC = () => {
@@ -19,6 +21,11 @@ export const Analytics: React.FC = () => {
   const [pageSize, setPageSize] = useState(50);
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
+  
+  // Chart states
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<any>(null);
+  const [selectedRange, setSelectedRange] = useState('All');
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -101,6 +108,7 @@ export const Analytics: React.FC = () => {
 
       return {
         time: timestamp.toISOString().split('.')[0].replace('T', ' '),
+        timestamp: data.timestamp,
         position,
         closed: Number(closedProfit.toFixed(2)),
         aep: Number(aep.toFixed(3)),
@@ -123,6 +131,205 @@ export const Analytics: React.FC = () => {
     });
   }, [periodData, fromDate, toDate]);
 
+  const handleRangeChange = (range: string) => {
+    setSelectedRange(range);
+    if (!chartRef.current || !filteredData.length) return;
+
+    if (range === 'All') {
+      // Show from first to last data point
+      const firstTime = Math.floor(filteredData[0].timestamp / 1000);
+      const lastTime = Math.floor(filteredData[filteredData.length - 1].timestamp / 1000);
+      
+      chartRef.current.timeScale().setVisibleRange({
+        from: firstTime,
+        to: lastTime
+      });
+    } else {
+      // Use specific time ranges for other options
+      const lastPoint = filteredData[filteredData.length - 1];
+      const endTime = lastPoint.timestamp;
+      const endDate = new Date(endTime);
+      let startDate = new Date(endTime);
+
+      const intervalsPerDay = 96; // 24 hours * 4 (15-min intervals)
+      switch (range) {
+        case '1D':
+          startDate = new Date(endTime - (intervalsPerDay * 15 * 60 * 1000));
+          break;
+        case '7D':
+          startDate = new Date(endTime - (7 * intervalsPerDay * 15 * 60 * 1000));
+          break;
+        case '30D':
+          startDate = new Date(endTime - (30 * intervalsPerDay * 15 * 60 * 1000));
+          break;
+        case '1Y':
+          startDate = new Date(endTime - (365 * intervalsPerDay * 15 * 60 * 1000));
+          break;
+      }
+
+      chartRef.current.timeScale().setVisibleRange({
+        from: Math.floor(startDate.getTime() / 1000),
+        to: Math.floor(endDate.getTime() / 1000),
+      });
+    }
+  };
+
+  // Chart effect
+  useEffect(() => {
+    if (!chartContainerRef.current || !filteredData.length) return;
+
+    const chart = createChart(chartContainerRef.current, {
+      layout: {
+        background: { color: '#f8fafc' },
+        textColor: '#64748b',
+      },
+      grid: {
+        vertLines: { color: '#e2e8f0' },
+        horzLines: { color: '#e2e8f0' },
+      },
+      rightPriceScale: {
+        borderColor: '#e2e8f0',
+        mode: 1, // Normal scale
+      },
+      timeScale: {
+        borderColor: '#e2e8f0',
+        timeVisible: true,
+        secondsVisible: false,
+        rightOffset: 5,
+        rightBarStaysOnScroll: false,
+        lockVisibleTimeRangeOnResize: true,
+        minBarSpacing: 0.1,
+        barSpacing: 1,
+        fixLeftEdge: false,
+        fixRightEdge: false,
+        visible: true,
+      },
+      handleScroll: {
+        mouseWheel: true,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: false,
+      },
+      handleScale: {
+        axisPressedMouseMove: {
+          time: true,
+          price: false,
+        },
+        axisDoubleClickReset: {
+          time: true,
+          price: false,
+        },
+        mouseWheel: true,
+        pinch: true,
+      },
+      crosshair: {
+        vertLine: {
+          labelBackgroundColor: '#1e293b',
+        },
+        horzLine: {
+          labelBackgroundColor: '#1e293b',
+        },
+      },
+    });
+
+    chartRef.current = chart;
+
+    // Prepare data series - single line for totals only
+    const totalSeries = filteredData.map(d => ({
+      time: Math.floor(d.timestamp / 1000),
+      value: d.total + 100000 // Add 100,000 to the total
+    }));
+
+    // Add single line series for totals
+    const totalLine = chart.addLineSeries({
+      color: '#3b82f6',
+      lineWidth: 3,
+      title: 'Total P&L',
+    });
+
+    totalLine.setData(totalSeries);
+
+    // Set the visible range to show from first to last data point
+    if (totalSeries.length > 0) {
+      const firstTime = totalSeries[0].time;
+      const lastTime = totalSeries[totalSeries.length - 1].time;
+      
+      chart.timeScale().setVisibleRange({
+        from: firstTime,
+        to: lastTime
+      });
+    }
+
+    // Create tooltip
+    const toolTipDiv = document.createElement('div');
+    toolTipDiv.className = 'fixed hidden px-3 py-2 bg-slate-800 text-white text-xs rounded shadow-lg pointer-events-none z-50';
+    document.body.appendChild(toolTipDiv);
+
+    let mouseX = 0;
+    let mouseY = 0;
+    const mouseMoveHandler = (e: MouseEvent) => {
+      mouseX = e.clientX;
+      mouseY = e.clientY;
+    };
+    chartContainerRef.current.addEventListener('mousemove', mouseMoveHandler);
+
+    chart.subscribeCrosshairMove(param => {
+      if (param.point === undefined || !param.time || param.point.x < 0 || param.point.y < 0) {
+        toolTipDiv.style.display = 'none';
+        return;
+      }
+
+      const dataPoint = filteredData.find(d => Math.floor(d.timestamp / 1000) === param.time);
+      
+      if (dataPoint) {
+        toolTipDiv.style.display = 'block';
+        toolTipDiv.style.left = `${mouseX + 10}px`;
+        toolTipDiv.style.top = `${mouseY - 10}px`;
+        
+        const formattedDate = new Date(dataPoint.timestamp).toLocaleString('en-US', {
+          month: '2-digit',
+          day: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+
+        toolTipDiv.innerHTML = `
+          <div class="space-y-1">
+            <div class="font-bold">${formattedDate}</div>
+            <div>Position: ${dataPoint.position}</div>
+            <div>Closed P&L: $${formatCurrency(dataPoint.closed)}</div>
+            <div>Open P&L: $${formatCurrency(dataPoint.open)}</div>
+            <div>Total P&L: <span class="${dataPoint.total >= 0 ? 'text-emerald-400' : 'text-rose-400'}">$${formatCurrency(dataPoint.total)}</span></div>
+          </div>
+        `;
+      } else {
+        toolTipDiv.style.display = 'none';
+      }
+    });
+
+    // Set initial range - show all data from first to last point
+    if (totalSeries.length > 0) {
+      const firstTime = totalSeries[0].time;
+      const lastTime = totalSeries[totalSeries.length - 1].time;
+      
+      chartRef.current.timeScale().setVisibleRange({
+        from: firstTime,
+        to: lastTime
+      });
+    }
+
+    return () => {
+      chart.remove();
+      if (document.body.contains(toolTipDiv)) {
+        document.body.removeChild(toolTipDiv);
+      }
+      if (chartContainerRef.current) {
+        chartContainerRef.current.removeEventListener('mousemove', mouseMoveHandler);
+      }
+    };
+  }, [filteredData]);
+
   if (!backtestData) {
     return null;
   }
@@ -137,116 +344,155 @@ export const Analytics: React.FC = () => {
     setCurrentPage(1);
   };
 
+  const timeRanges = [
+    { value: 'All', label: 'All' },
+    { value: '1D', label: '1 Day' },
+    { value: '7D', label: '7 Days' },
+    { value: '30D', label: '30 Days' },
+    { value: '1Y', label: '1 Year' }
+  ];
+
   return (
-    <div className="overflow-hidden">
-      <div className="p-4 border-b">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold">Mark to Market Analytics (15min)</h3>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-slate-400" />
-              <input
-                type="date"
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                className="px-2 py-1 border rounded-md text-sm"
-              />
-              <span className="text-slate-400">to</span>
-              <input
-                type="date"
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-                className="px-2 py-1 border rounded-md text-sm"
-              />
+    <div className="w-full h-full">
+      {/* Chart Section */}
+      <div className="bg-white rounded-lg shadow-sm overflow-hidden mb-4">
+        <div className="p-4">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-semibold">Period Totals Chart</h3>
+            <div className="flex gap-2">
+              {timeRanges.map(range => (
+                <button
+                  key={range.value}
+                  onClick={() => handleRangeChange(range.value)}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                    selectedRange === range.value
+                      ? 'bg-blue-100 text-blue-800'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {range.label}
+                </button>
+              ))}
             </div>
           </div>
+          <div 
+            ref={chartContainerRef} 
+            className="h-96 bg-slate-50 rounded-lg border border-slate-100"
+          />
         </div>
-        <p className="text-sm text-slate-500">
-          {filteredData.length > 0 
-            ? `Showing periods ${indexOfFirstPeriod + 1}-${Math.min(indexOfLastPeriod, filteredData.length)} of ${filteredData.length}`
-            : 'No data available'}
-        </p>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead className="bg-slate-50 text-sm text-slate-600">
-            <tr>
-              <th className="px-4 py-3 text-left font-semibold">Date</th>
-              <th className="px-4 py-3 text-right font-semibold">Pos</th>
-              <th className="px-4 py-3 text-right font-semibold">Closed</th>
-              <th className="px-4 py-3 text-right font-semibold">AEP</th>
-              <th className="px-4 py-3 text-right font-semibold">EOPeriod Price</th>
-              <th className="px-4 py-3 text-right font-semibold">ConvertFX</th>
-              <th className="px-4 py-3 text-right font-semibold">Open</th>
-              <th className="px-4 py-3 text-right font-semibold">Total</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {currentPeriods.length > 0 ? (
-              currentPeriods.map((period, index) => (
-                <tr key={index} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-4 py-3 text-sm">{period.time}</td>
-                  <td className="px-4 py-3 text-sm text-right">{period.position}</td>
-                  <td className="px-4 py-3 text-sm text-right">${formatCurrency(period.closed)}</td>
-                  <td className="px-4 py-3 text-sm text-right">${formatPrice(period.aep)}</td>
-                  <td className="px-4 py-3 text-sm text-right">${formatPrice(period.eoPeriodPrice)}</td>
-                  <td className="px-4 py-3 text-sm text-right">${formatPrice(period.convertFX)}</td>
-                  <td className="px-4 py-3 text-sm text-right">${formatCurrency(period.open)}</td>
-                  <td className="px-4 py-3 text-sm text-right font-medium">
-                    <span className={period.total >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
-                      ${formatCurrency(period.total)}
-                    </span>
+
+      {/* Table Section */}
+      <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+        <div className="p-4 border-b">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">Mark to Market Analytics (15min)</h3>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-slate-400" />
+                <input
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="px-2 py-1 border rounded-md text-sm"
+                />
+                <span className="text-slate-400">to</span>
+                <input
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="px-2 py-1 border rounded-md text-sm"
+                />
+              </div>
+            </div>
+          </div>
+          <p className="text-sm text-slate-500">
+            {filteredData.length > 0 
+              ? `Showing periods ${indexOfFirstPeriod + 1}-${Math.min(indexOfLastPeriod, filteredData.length)} of ${filteredData.length}`
+              : 'No data available'}
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-slate-50 text-sm text-slate-600">
+              <tr>
+                <th className="px-4 py-3 text-left font-semibold">Date</th>
+                <th className="px-4 py-3 text-right font-semibold">Pos</th>
+                <th className="px-4 py-3 text-right font-semibold">Closed</th>
+                <th className="px-4 py-3 text-right font-semibold">AEP</th>
+                <th className="px-4 py-3 text-right font-semibold">EOPeriod Price</th>
+                <th className="px-4 py-3 text-right font-semibold">ConvertFX</th>
+                <th className="px-4 py-3 text-right font-semibold">Open</th>
+                <th className="px-4 py-3 text-right font-semibold">Total</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {currentPeriods.length > 0 ? (
+                currentPeriods.map((period, index) => (
+                  <tr key={index} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-4 py-3 text-sm">{period.time}</td>
+                    <td className="px-4 py-3 text-sm text-right">{period.position}</td>
+                    <td className="px-4 py-3 text-sm text-right">${formatCurrency(period.closed)}</td>
+                    <td className="px-4 py-3 text-sm text-right">${formatPrice(period.aep)}</td>
+                    <td className="px-4 py-3 text-sm text-right">${formatPrice(period.eoPeriodPrice)}</td>
+                    <td className="px-4 py-3 text-sm text-right">${formatPrice(period.convertFX)}</td>
+                    <td className="px-4 py-3 text-sm text-right">${formatCurrency(period.open)}</td>
+                    <td className="px-4 py-3 text-sm text-right font-medium">
+                      <span className={period.total >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                        ${formatCurrency(period.total)}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
+                    No analytics data available
                   </td>
                 </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
-                  No analytics data available
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-      {totalPages > 1 && (
-        <div className="px-4 py-3 border-t flex justify-between items-center text-sm">
-          <div className="flex items-center gap-4">
-            <span>
-              Showing {indexOfFirstPeriod + 1}-{Math.min(indexOfLastPeriod, filteredData.length)} of {filteredData.length} periods
-            </span>
-            <select
-              value={pageSize}
-              onChange={(e) => handlePageSizeChange(Number(e.target.value))}
-              className="px-2 py-1 border rounded-md text-sm"
-            >
-              <option value={10}>10 per page</option>
-              <option value={50}>50 per page</option>
-              <option value={100}>100 per page</option>
-            </select>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-              disabled={currentPage === 1}
-              className={`px-3 py-1.5 rounded ${
-                currentPage === 1 ? 'text-slate-400 cursor-not-allowed' : 'hover:bg-slate-100'
-              }`}
-            >
-              Previous
-            </button>
-            <button
-              onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-              disabled={currentPage === totalPages}
-              className={`px-3 py-1.5 rounded ${
-                currentPage === totalPages ? 'text-slate-400 cursor-not-allowed' : 'hover:bg-slate-100'
-              }`}
-            >
-              Next
-            </button>
-          </div>
+              )}
+            </tbody>
+          </table>
         </div>
-      )}
+        {totalPages > 1 && (
+          <div className="px-4 py-3 border-t flex justify-between items-center text-sm">
+            <div className="flex items-center gap-4">
+              <span>
+                Showing {indexOfFirstPeriod + 1}-{Math.min(indexOfLastPeriod, filteredData.length)} of {filteredData.length} periods
+              </span>
+              <select
+                value={pageSize}
+                onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                className="px-2 py-1 border rounded-md text-sm"
+              >
+                <option value={10}>10 per page</option>
+                <option value={50}>50 per page</option>
+                <option value={100}>100 per page</option>
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className={`px-3 py-1.5 rounded ${
+                  currentPage === 1 ? 'text-slate-400 cursor-not-allowed' : 'hover:bg-slate-100'
+                }`}
+              >
+                Previous
+              </button>
+              <button
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className={`px-3 py-1.5 rounded ${
+                  currentPage === totalPages ? 'text-slate-400 cursor-not-allowed' : 'hover:bg-slate-100'
+                }`}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
