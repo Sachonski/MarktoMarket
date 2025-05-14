@@ -26,6 +26,7 @@ export const Analytics: React.FC = () => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
   const [selectedRange, setSelectedRange] = useState('All');
+  const [initialBalance, setInitialBalance] = useState(100000);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -237,14 +238,14 @@ export const Analytics: React.FC = () => {
     // Prepare data series - single line for totals only
     const totalSeries = filteredData.map(d => ({
       time: Math.floor(d.timestamp / 1000),
-      value: d.total + 100000 // Add 100,000 to the total
+      value: d.total + initialBalance // Add initial balance to the total
     }));
 
     // Add single line series for totals
     const totalLine = chart.addLineSeries({
       color: '#3b82f6',
       lineWidth: 3,
-      title: 'Total P&L',
+      title: 'Total Balance',
     });
 
     totalLine.setData(totalSeries);
@@ -300,7 +301,8 @@ export const Analytics: React.FC = () => {
             <div>Position: ${dataPoint.position}</div>
             <div>Closed P&L: $${formatCurrency(dataPoint.closed)}</div>
             <div>Open P&L: $${formatCurrency(dataPoint.open)}</div>
-            <div>Total P&L: <span class="${dataPoint.total >= 0 ? 'text-emerald-400' : 'text-rose-400'}">$${formatCurrency(dataPoint.total)}</span></div>
+            <div>Net P&L: <span class="${dataPoint.total >= 0 ? 'text-emerald-400' : 'text-rose-400'}">$${formatCurrency(dataPoint.total)}</span></div>
+            <div>Total Balance: <span class="${(dataPoint.total + initialBalance) >= initialBalance ? 'text-emerald-400' : 'text-rose-400'}">$${formatCurrency(dataPoint.total + initialBalance)}</span></div>
           </div>
         `;
       } else {
@@ -328,7 +330,7 @@ export const Analytics: React.FC = () => {
         chartContainerRef.current.removeEventListener('mousemove', mouseMoveHandler);
       }
     };
-  }, [filteredData]);
+  }, [filteredData, initialBalance]);
 
   if (!backtestData) {
     return null;
@@ -358,7 +360,19 @@ export const Analytics: React.FC = () => {
       <div className="bg-white rounded-lg shadow-sm overflow-hidden mb-4">
         <div className="p-4">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold">Period Totals Chart</h3>
+            <div className="flex items-center gap-4">
+              <h3 className="text-lg font-semibold">Period Totals Chart</h3>
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-slate-600">Initial Balance:</label>
+                <input
+                  type="number"
+                  value={initialBalance}
+                  onChange={(e) => setInitialBalance(Number(e.target.value))}
+                  className="px-2 py-1 border rounded-md text-sm w-32"
+                  placeholder="Initial balance"
+                />
+              </div>
+            </div>
             <div className="flex gap-2">
               {timeRanges.map(range => (
                 <button
