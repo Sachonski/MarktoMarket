@@ -9,7 +9,7 @@ import { useBacktest } from "../context/BacktestContext";
 export const Dashboard: React.FC = () => {
   const { backtestData, setBacktestData } = useBacktest();
   const [platform, setPlatform] = useState<"MT4" | "MT5">("MT4");
-  const [selectedTradeType, setSelectedTradeType] = useState<string>("T/P");
+  const [selectedTradeType, setSelectedTradeType] = useState<string>("CLOSED");
   const [activeTab, setActiveTab] = useState<"history" | "analytics">(
     "history"
   );
@@ -93,4 +93,4 @@ export const Dashboard: React.FC = () => {
       )}
     </div>
   );
-};
+}
