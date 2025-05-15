@@ -89,7 +89,7 @@ export const Analytics: React.FC = () => {
             openOrderMap[trade.time] = [-lots, price];
             break;
           case 't/p':
-          case 'close at stop':
+          case 's/l':
             const orderKey = Object.keys(openOrderMap)[0]; // Get the oldest open order
             if (orderKey) {
               const [orderLots] = openOrderMap[orderKey];
