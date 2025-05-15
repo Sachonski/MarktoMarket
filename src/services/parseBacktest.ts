@@ -150,13 +150,15 @@ const extractTrades = (doc: Document, platform: 'MT4' | 'MT5'): Trade[] => {
     
     if (platform === 'MT4') {
       const type = cells[2].textContent?.trim() || '';
-      if (!['buy', 'sell', 't/p'].includes(type.toLowerCase())) continue;
+      // Check for valid trade types including 's/l'
+      if (!['buy', 'sell', 't/p', 's/l'].includes(type.toLowerCase())) continue;
       
       const trade: Trade = {
         time: cells[1].textContent?.trim() || '',
         type: type.toUpperCase(),
         price: cells[5].textContent?.trim() || '',
         takeProfit: cells[7].textContent?.trim() || '',
+        stopLoss: cells[6]?.textContent?.trim() || '',  // MT4 typically has Stop Loss in column 6
         balance: cells[9]?.textContent?.trim() || '',
         total: cells[9]?.textContent?.trim() || '',
         profitLoss: cells[8]?.textContent?.trim() || '',
@@ -167,11 +169,10 @@ const extractTrades = (doc: Document, platform: 'MT4' | 'MT5'): Trade[] => {
       trades.push(trade);
     } else {
       // For MT5, check if this is an order row by looking for specific patterns
-      // MT5 reports typically have "buy", "sell", or "t/p" in the type column
       let typeIndex = -1;
       for (let i = 0; i < cells.length; i++) {
         const cellText = cells[i].textContent?.trim().toLowerCase() || '';
-        if (cellText === 'buy' || cellText === 'sell' || cellText === 'tp') {
+        if (cellText === 'buy' || cellText === 'sell' || cellText === 'tp' || cellText === 'sl') {
           typeIndex = i;
           break;
         }
@@ -182,14 +183,38 @@ const extractTrades = (doc: Document, platform: 'MT4' | 'MT5'): Trade[] => {
       // Once we found the type column, we can map other columns relative to it
       const type = cells[typeIndex].textContent?.trim() || '';
       
-      // Determine time column (usually 2 columns before type)
+      // Normalize type names
+      let normalizedType = type.toUpperCase();
+      if (normalizedType === 'TP') normalizedType = 'T/P';
+      if (normalizedType === 'SL') normalizedType = 'S/L';
+      
+      // Determine time column (typically 1-2 columns before type)
       const timeIndex = Math.max(0, typeIndex - 1);
       
-      // Price is usually 2-3 columns after type
+      // Price is typically 2-3 columns after type
       const priceIndex = typeIndex + 3;
       
-      // Take profit is usually 2 columns after price
-      const takeProfitIndex = priceIndex + 2;
+      // Take profit and stop loss positions can vary in MT5 reports
+      // We'll try to find them by looking for columns with numeric values
+      let takeProfitIndex = -1;
+      let stopLossIndex = -1;
+      
+      // Look for numeric values in columns after price
+      for (let i = priceIndex + 1; i < cells.length - 3; i++) {
+        const cellText = cells[i]?.textContent?.trim() || '';
+        if (cellText && !isNaN(parseFloat(cellText))) {
+          if (takeProfitIndex === -1) {
+            takeProfitIndex = i;
+          } else if (stopLossIndex === -1) {
+            stopLossIndex = i;
+            break;
+          }
+        }
+      }
+      
+      // Fallback to relative positions if not found
+      if (takeProfitIndex === -1) takeProfitIndex = priceIndex + 2;
+      if (stopLossIndex === -1) stopLossIndex = takeProfitIndex + 1;
       
       // Balance is usually near the end
       const balanceIndex = cells.length - 3;
@@ -199,15 +224,21 @@ const extractTrades = (doc: Document, platform: 'MT4' | 'MT5'): Trade[] => {
       
       const trade: Trade = {
         time: cells[timeIndex].textContent?.trim() || '',
-        type: type.toUpperCase(),
+        type: normalizedType,
         price: cells[priceIndex]?.textContent?.trim() || '',
         takeProfit: cells[takeProfitIndex]?.textContent?.trim() || '',
+        stopLoss: cells[stopLossIndex]?.textContent?.trim() || '',
         balance: cells[balanceIndex]?.textContent?.trim() || '',
         total: cells[balanceIndex]?.textContent?.trim() || '',
         profitLoss: cells[profitLossIndex]?.textContent?.trim() || '',
         open: '1',
         convertFX: '1.0000'
       };
+      
+      // For S/L trades, ensure stopLoss has the right value
+      if (normalizedType === 'S/L' && trade.stopLoss === '') {
+        trade.stopLoss = trade.price; // Use the executed price as the stop loss for S/L trades
+      }
       
       trades.push(trade);
     }
@@ -217,13 +248,16 @@ const extractTrades = (doc: Document, platform: 'MT4' | 'MT5'): Trade[] => {
 };
 
 const calculateMetrics = (trades: Trade[]): Metrics => {
-  const tpTrades = trades.filter(t => t.type.toLowerCase() === 't/p');
-  const totalTpTrades = tpTrades.length;
+  // Include both T/P and S/L trades in the calculations
+  const closedTrades = trades.filter(t => 
+    t.type.toLowerCase() === 't/p' || t.type.toLowerCase() === 's/l'
+  );
+  const totalClosedTrades = closedTrades.length || 1; // Avoid division by zero
   
-  const winningTrades = tpTrades.filter(t => parseFloat(t.profitLoss || '0') > 0).length;
-  const losingTrades = tpTrades.filter(t => parseFloat(t.profitLoss || '0') < 0).length;
+  const winningTrades = closedTrades.filter(t => parseFloat(t.profitLoss || '0') > 0).length;
+  const losingTrades = closedTrades.filter(t => parseFloat(t.profitLoss || '0') < 0).length;
   
-  const winRate = ((winningTrades / totalTpTrades) * 100).toFixed(1) + '%';
+  const winRate = ((winningTrades / totalClosedTrades) * 100).toFixed(1) + '%';
   
   const totalProfitLoss = trades.reduce((sum, trade) => {
     return sum + parseFloat(trade.profitLoss || '0');
@@ -254,7 +288,7 @@ const calculateMetrics = (trades: Trade[]): Metrics => {
     if (balance > peak) {
       peak = balance;
     }
-    const drawdown = ((peak - balance) / peak) * 100;
+    const drawdown = peak > 0 ? ((peak - balance) / peak) * 100 : 0;
     if (drawdown > maxDrawdown) {
       maxDrawdown = drawdown;
     }

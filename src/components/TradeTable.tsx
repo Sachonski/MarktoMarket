@@ -19,12 +19,35 @@ export const TradeTable: React.FC<TradeTableProps> = ({ selectedTradeType, setSe
     return null;
   }
 
-  // Get unique trade types
-  const tradeTypes = Array.from(new Set(backtestData.trades.map(trade => trade.type)));
+  // Ensure S/L trades are recognized in the system
+  const enhancedTrades = backtestData.trades.map(trade => {
+    // If the trade doesn't have a defined type, check if it's a stop loss based on other attributes
+    if (trade.type === 'S/L' || (trade.type === undefined && trade.stopLoss && parseFloat(trade.profitLoss) < 0)) {
+      return { ...trade, type: 'S/L' };
+    }
+    return trade;
+  });
 
-  const filteredTrades = selectedTradeType === 'ALL' 
-    ? backtestData.trades 
-    : backtestData.trades.filter(trade => trade.type === selectedTradeType);
+  // Get unique trade types
+  const tradeTypes = Array.from(new Set(enhancedTrades.map(trade => trade.type)));
+  
+  // Create custom filter options
+  const customFilters = [
+    { value: 'ALL', label: 'All Trades' },
+    { value: 'CLOSED', label: 'Closed Trades (S/L + T/P)' }
+  ];
+  
+  let filteredTrades = enhancedTrades;
+  
+  if (selectedTradeType === 'CLOSED') {
+    // Show only S/L and T/P trades
+    filteredTrades = enhancedTrades.filter(trade => 
+      trade.type === 'S/L' || trade.type === 'T/P'
+    );
+  } else if (selectedTradeType !== 'ALL') {
+    // Filter by specific trade type
+    filteredTrades = enhancedTrades.filter(trade => trade.type === selectedTradeType);
+  }
 
   const sortedTrades = [...filteredTrades].sort((a, b) => {
     if (a[sortField] < b[sortField]) return sortDirection === 'asc' ? -1 : 1;
@@ -70,8 +93,8 @@ export const TradeTable: React.FC<TradeTableProps> = ({ selectedTradeType, setSe
   const exportToCSV = () => {
     if (!backtestData || !backtestData.trades) return;
 
-    const headers = Object.keys(backtestData.trades[0]).join(',');
-    const rows = backtestData.trades.map(trade => 
+    const headers = Object.keys(enhancedTrades[0]).join(',');
+    const rows = enhancedTrades.map(trade => 
       Object.values(trade).join(',')
     ).join('\n');
     
@@ -92,6 +115,30 @@ export const TradeTable: React.FC<TradeTableProps> = ({ selectedTradeType, setSe
       <ChevronDown className="w-4 h-4" />;
   };
 
+  // Helper to get appropriate style for trade type
+  const getTradeTypeStyle = (type: string) => {
+    switch(type) {
+      case 'BUY':
+        return 'bg-emerald-100 text-emerald-800';
+      case 'SELL':
+        return 'bg-rose-100 text-rose-800';
+      case 'T/P':
+        return 'bg-blue-100 text-blue-800';
+      case 'S/L':
+        return 'bg-amber-100 text-amber-800';
+      default:
+        return 'bg-slate-100 text-slate-800';
+    }
+  };
+  
+  // Helper to format numeric values with fallback
+  const formatNumericValue = (value: string | number | undefined, formatter: (val: string | number) => string) => {
+    if (value === undefined || value === null || value === '' || isNaN(parseFloat(value.toString()))) {
+      return '-';
+    }
+    return '$' + formatter(value);
+  };
+
   return (
     <div className="bg-white rounded-lg shadow-sm overflow-hidden">
       <div className="p-4 flex justify-between items-center border-b">
@@ -102,10 +149,15 @@ export const TradeTable: React.FC<TradeTableProps> = ({ selectedTradeType, setSe
             onChange={(e) => setSelectedTradeType(e.target.value)}
             className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-md text-sm font-medium transition-colors border-none focus:ring-2 focus:ring-blue-200"
           >
-            <option value="ALL">All Trades</option>
-            {tradeTypes.map(type => (
-              <option key={type} value={type}>{type}</option>
+            {customFilters.map(filter => (
+              <option key={filter.value} value={filter.value}>{filter.label}</option>
             ))}
+            {tradeTypes
+              .filter(type => !['ALL', 'CLOSED'].includes(type)) // Exclude any that might overlap with custom filters
+              .map(type => (
+                <option key={type} value={type}>{type}</option>
+              ))
+            }
           </select>
         </div>
         <button 
@@ -156,6 +208,14 @@ export const TradeTable: React.FC<TradeTableProps> = ({ selectedTradeType, setSe
               <th className="px-4 py-3 text-left font-semibold">
                 <button 
                   className="flex items-center gap-1.5"
+                  onClick={() => handleSort('stopLoss')}
+                >
+                  Stop Loss <SortIcon field="stopLoss" />
+                </button>
+              </th>
+              <th className="px-4 py-3 text-left font-semibold">
+                <button 
+                  className="flex items-center gap-1.5"
                   onClick={() => handleSort('balance')}
                 >
                   Balance <SortIcon field="balance" />
@@ -179,23 +239,19 @@ export const TradeTable: React.FC<TradeTableProps> = ({ selectedTradeType, setSe
               >
                 <td className="px-4 py-3 text-sm">{trade.time}</td>
                 <td className="px-4 py-3 text-sm">
-                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                    trade.type === 'BUY' ? 'bg-emerald-100 text-emerald-800' : 
-                    trade.type === 'SELL' ? 'bg-rose-100 text-rose-800' : 
-                    trade.type === 'T/P' ? 'bg-blue-100 text-blue-800' :
-                    'bg-slate-100 text-slate-800'
-                  }`}>
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${getTradeTypeStyle(trade.type)}`}>
                     {trade.type}
                   </span>
                 </td>
-                <td className="px-4 py-3 text-sm">${formatPrice(trade.price)}</td>
-                <td className="px-4 py-3 text-sm">${formatPrice(trade.takeProfit)}</td>
-                <td className="px-4 py-3 text-sm">${formatCurrency(trade.balance)}</td>
+                <td className="px-4 py-3 text-sm">{formatNumericValue(trade.price, formatPrice)}</td>
+                <td className="px-4 py-3 text-sm">{formatNumericValue(trade.takeProfit, formatPrice)}</td>
+                <td className="px-4 py-3 text-sm">{formatNumericValue(trade.stopLoss, formatPrice)}</td>
+                <td className="px-4 py-3 text-sm">{formatNumericValue(trade.balance, formatCurrency)}</td>
                 <td className={`px-4 py-3 text-sm font-medium ${
                   parseFloat(trade.profitLoss) > 0 ? 'text-emerald-600' : 
                   parseFloat(trade.profitLoss) < 0 ? 'text-rose-600' : 'text-slate-600'
                 }`}>
-                  ${formatCurrency(trade.profitLoss)}
+                  {formatNumericValue(trade.profitLoss, formatCurrency)}
                 </td>
               </tr>
             ))}

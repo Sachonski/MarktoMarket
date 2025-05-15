@@ -65,11 +65,12 @@ export const TradeCharts: React.FC = () => {
   useEffect(() => {
     if (!backtestData || !chartContainerRef.current) return;
 
-    const tpTrades = backtestData.trades
-      .filter(trade => trade.type.toLowerCase() === 't/p')
+    // Include both T/P and S/L trades in the chart
+    const closedTrades = backtestData.trades
+      .filter(trade => trade.type.toLowerCase() === 't/p' || trade.type.toLowerCase() === 's/l')
       .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
 
-    if (tpTrades.length === 0) return;
+    if (closedTrades.length === 0) return;
 
     const chart = createChart(chartContainerRef.current, {
       layout: {
@@ -131,11 +132,12 @@ export const TradeCharts: React.FC = () => {
 
     chartRef.current = chart;
 
-    let priceData = tpTrades.map(trade => ({
+    let priceData = closedTrades.map(trade => ({
       time: Math.floor(new Date(trade.time).getTime() / 1000),
       value: parseFloat(trade.price),
       profitLoss: parseFloat(trade.profitLoss),
-      trades: 1
+      trades: 1,
+      tradeType: trade.type.toUpperCase()
     }));
 
     const marketData = (backtestData.marketData || [])
@@ -179,13 +181,26 @@ export const TradeCharts: React.FC = () => {
       visible: showMarkToMarket,
     });
 
-    const markers = priceData.map(point => ({
-      time: point.time,
-      position: 'aboveBar',
-      color: point.profitLoss > 0 ? '#10b98180' : '#ef444480',
-      shape: 'circle',
-      size: 1,
-    }));
+    // Create markers with different colors for T/P and S/L trades
+    const markers = priceData.map(point => {
+      // For T/P trades with profit, use green. For T/P trades with loss, use red.
+      // For S/L trades, use amber/orange regardless of profit/loss (typically a loss).
+      let markerColor = '#ef444480'; // Default to red (loss)
+      
+      if (point.tradeType === 'T/P' && point.profitLoss > 0) {
+        markerColor = '#10b98180'; // Green for profitable T/P
+      } else if (point.tradeType === 'S/L') {
+        markerColor = '#f59e0b80'; // Amber for S/L trades
+      }
+      
+      return {
+        time: point.time,
+        position: 'aboveBar',
+        color: markerColor,
+        shape: 'circle',
+        size: 1,
+      };
+    });
 
     backtestSeries.setData(priceData);
     markToMarketSeries.setData(markToMarketData);
@@ -208,11 +223,11 @@ export const TradeCharts: React.FC = () => {
         return;
       }
 
-      const tpPoint = priceData.find(d => d.time === param.time);
+      const tradePoint = priceData.find(d => d.time === param.time);
       const marketPoint = marketData.find(d => Math.floor(d.timestamp / 1000) === param.time);
       const markToMarketPoint = markToMarketData.find(d => d.time === param.time);
       
-      if (tpPoint || marketPoint) {
+      if (tradePoint || marketPoint) {
         toolTipDiv.style.display = 'block';
         toolTipDiv.style.left = `${mouseX + 10}px`;
         toolTipDiv.style.top = `${mouseY - 10}px`;
@@ -226,11 +241,11 @@ export const TradeCharts: React.FC = () => {
           minute: '2-digit'
         });
 
-        if (tpPoint) {
+        if (tradePoint) {
           // Show ONLY the trade data at this exact timestamp
           const trade = backtestData.trades.find(t => 
             Math.floor(new Date(t.time).getTime() / 1000) === param.time && 
-            t.type.toLowerCase() === 't/p'
+            (t.type.toLowerCase() === 't/p' || t.type.toLowerCase() === 's/l')
           );
           
           if (trade) {
