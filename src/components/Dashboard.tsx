@@ -35,7 +35,7 @@ export const Dashboard: React.FC = () => {
         <button
           onClick={() => {
             setPlatform("MT5");
-            window.location.href = "https://jovial-druid-2dbb0c.netlify.app/";
+            window.location.href = "https://beamish-quokka-055377.netlify.app/";
           }}
           className={`px-6 py-2.5 rounded-full text-lg font-medium transition-all ${
             platform === "MT5"
