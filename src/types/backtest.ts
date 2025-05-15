@@ -40,4 +40,5 @@ export interface BacktestData {
   metrics: Metrics;
   platform: 'MT4' | 'MT5';
   marketData: MarketData[] | null;
+  initialDeposit: number;
 }

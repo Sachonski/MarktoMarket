@@ -26,7 +26,6 @@ export const Analytics: React.FC = () => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
   const [selectedRange, setSelectedRange] = useState('All');
-  const [initialBalance, setInitialBalance] = useState(100000);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -238,7 +237,7 @@ export const Analytics: React.FC = () => {
     // Prepare data series - single line for totals only
     const totalSeries = filteredData.map(d => ({
       time: Math.floor(d.timestamp / 1000),
-      value: d.total + initialBalance // Add initial balance to the total
+      value: d.total + backtestData.initialDeposit // Add initial deposit to the total
     }));
 
     // Add single line series for totals
@@ -302,7 +301,7 @@ export const Analytics: React.FC = () => {
             <div>Closed P&L: $${formatCurrency(dataPoint.closed)}</div>
             <div>Open P&L: $${formatCurrency(dataPoint.open)}</div>
             <div>Net P&L: <span class="${dataPoint.total >= 0 ? 'text-emerald-400' : 'text-rose-400'}">$${formatCurrency(dataPoint.total)}</span></div>
-            <div>Total Balance: <span class="${(dataPoint.total + initialBalance) >= initialBalance ? 'text-emerald-400' : 'text-rose-400'}">$${formatCurrency(dataPoint.total + initialBalance)}</span></div>
+            <div>Total Balance: <span class="${(dataPoint.total + backtestData.initialDeposit) >= backtestData.initialDeposit ? 'text-emerald-400' : 'text-rose-400'}">$${formatCurrency(dataPoint.total + backtestData.initialDeposit)}</span></div>
           </div>
         `;
       } else {
@@ -330,7 +329,7 @@ export const Analytics: React.FC = () => {
         chartContainerRef.current.removeEventListener('mousemove', mouseMoveHandler);
       }
     };
-  }, [filteredData, initialBalance]);
+  }, [filteredData, backtestData?.initialDeposit]);
 
   if (!backtestData) {
     return null;
@@ -362,16 +361,6 @@ export const Analytics: React.FC = () => {
           <div className="flex justify-between items-center mb-4">
             <div className="flex items-center gap-4">
               <h3 className="text-lg font-semibold">Period Totals Chart</h3>
-              <div className="flex items-center gap-2">
-                <label className="text-sm text-slate-600">Initial Balance:</label>
-                <input
-                  type="number"
-                  value={initialBalance}
-                  onChange={(e) => setInitialBalance(Number(e.target.value))}
-                  className="px-2 py-1 border rounded-md text-sm w-32"
-                  placeholder="Initial balance"
-                />
-              </div>
             </div>
             <div className="flex gap-2">
               {timeRanges.map(range => (

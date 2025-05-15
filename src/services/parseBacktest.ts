@@ -17,6 +17,7 @@ export const parseBacktestHtml = async (file: File, platform: 'MT4' | 'MT5'): Pr
         }
         
         const symbol = extractSymbol(doc, platform);
+        const initialDeposit = extractInitialDeposit(doc);
         const metrics = calculateMetrics(trades);
 
         // Get date range from trades
@@ -73,7 +74,8 @@ export const parseBacktestHtml = async (file: File, platform: 'MT4' | 'MT5'): Pr
             trades,
             metrics,
             platform,
-            marketData
+            marketData,
+            initialDeposit
           });
         } catch (error) {
           console.error('API call failed:', error);
@@ -82,7 +84,8 @@ export const parseBacktestHtml = async (file: File, platform: 'MT4' | 'MT5'): Pr
             trades,
             metrics,
             platform,
-            marketData: null
+            marketData: null,
+            initialDeposit
           });
         }
       } catch (error) {
@@ -97,6 +100,21 @@ export const parseBacktestHtml = async (file: File, platform: 'MT4' | 'MT5'): Pr
     
     reader.readAsText(file);
   });
+};
+
+const extractInitialDeposit = (doc: Document): number => {
+  const depositRow = Array.from(doc.querySelectorAll('tr')).find(row => {
+    const cells = row.querySelectorAll('td');
+    return cells.length >= 2 && cells[0]?.textContent?.trim().toLowerCase() === 'initial deposit';
+  });
+
+  if (depositRow) {
+    const depositCell = depositRow.querySelector('td:last-child');
+    const depositText = depositCell?.textContent?.trim() || '0';
+    return parseFloat(depositText.replace(/[^0-9.-]+/g, ''));
+  }
+
+  return 100000; // Default value if not found
 };
 
 const extractSymbol = (doc: Document, platform: 'MT4' | 'MT5'): string => {
