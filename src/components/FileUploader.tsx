@@ -56,7 +56,8 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ platform }) => {
           sharpRatio: '0.00'
         },
         platform,
-        marketData: null
+        marketData: null,
+        initialDeposit: 100000
       } as BacktestData);
     } finally {
       setIsLoading(false);

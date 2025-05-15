@@ -109,7 +109,7 @@ const extractInitialDeposit = (doc: Document): number => {
   });
 
   if (depositRow) {
-    const depositCell = depositRow.querySelector('td:last-child');
+    const depositCell = depositRow.querySelector('td[align="right"]');
     const depositText = depositCell?.textContent?.trim() || '0';
     return parseFloat(depositText.replace(/[^0-9.-]+/g, ''));
   }
